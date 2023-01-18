@@ -29,6 +29,7 @@
             $xml_string = $this->getXmlContent();
             $xml_array = $this->covertToArray($xml_string);
             $response['data'] = $this->parseRow($xml_array);
+            $this->removeZip();
         } catch (Exception $exception) {
             $response['code'] = $exception->getCode();
             $response['message'] = $exception->getMessage();
@@ -235,6 +236,13 @@
             }
         }
         return $pics;
+    }
+
+    private function removeZip(): void
+    {
+        if (file_exists($this->file_path . $this->zip_name)) {
+            @unlink($this->file_path . $this->zip_name);
+        }
     }
 
 }
