@@ -16,7 +16,16 @@
     {
         $this->origin_file = $origin_file;
         $this->file_path = $file_path;
-        $this->getPathInfo();
+    }
+
+    public function __set(string $name, $value): void
+    {
+        if ($name === 'origin_file') {
+            $this->origin_file = $value;
+        }
+        spl_autoload();
+
+        // TODO: Implement __set() method.
     }
 
     public function run(): array
@@ -24,6 +33,7 @@
         $response = ['code' => 0, 'message' => '', 'data' => []];
 
         try {
+            $this->getPathInfo();
             $this->copyFile();
             $this->extractZip($this->file_path . $this->zip_name, ['xl/media', 'xl/drawings/drawing1.xml']);
             $xml_string = $this->getXmlContent();
@@ -114,7 +124,7 @@
                 foreach (explode('/', $path_info['dirname']) as $k) {
                     $tmp .= $k . '/';
                     if (!is_dir($tmp)) {
-                        @mkdir($tmp, 0777);
+                        @mkdir($tmp);
                     }
                 }
                 $res = @file_put_contents($complete_path, $zip->getStream($zip_entry_name));
@@ -226,13 +236,14 @@
             throw new  Exception("xml解析失败", "901");
         }
         foreach ($xml_array['xdr:twoCellAnchor'] as $dom) {
-            $row = $dom['xdr:from']['xdr:row'] ?? 0;
+            $row = $dom['xdr:from']['xdr:row'] ?? 0;//行
+            $col = $dom['xdr:from']['xdr:col'] ?? 0;//列
             if (!$row) {
                 throw new  Exception("xml解析失败", "902");
             }
             $pic = $dom['xdr:pic']['xdr:blipFill']['a:blip']['@attributes']['embed'] ?? "";
             if ($pic) {
-                $pics[$row][] = str_replace("rId", "image", $pic);
+                $pics[$col][$row][] = str_replace("rId", "image", $pic);
             }
         }
         return $pics;
@@ -247,7 +258,11 @@
 
 }
 
-$origin_name = 'D:/SubjectForTest/file/package_HYmodel_test_has_picture.xlsx';
-$pic = new extractExcelPic($origin_name , "D:/SubjectForTest/file/123/");
+$origin_name1 = 'D:/SubjectForTest/file/package_HYmodel_test_has_picture.xlsx';
+$origin_name2 = 'D:/SubjectForTest/file/package_HYmodel_test_1_picture.xlsx';
+$pic = new extractExcelPic('' , "D:/SubjectForTest/file/123/");
+$pic->origin_file = $origin_name1;
+$res = $pic->run();
+$pic->origin_file = $origin_name2;
 $res = $pic->run();
 var_dump($res);
