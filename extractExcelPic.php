@@ -9,8 +9,14 @@
     protected string $extract_path;
     public string $prefix = "ext";
     public string $origin_file;
-    public string $xml_path = "/xl/drawings/drawing1.xml";
+    public string $xml_path = "xl/drawings/drawing{{number}}.xml";
+    public string $xml_rel_path = "xl/drawings/_rels/drawing{{number}}.xml.rels";
+    public string $media_path = "xl/media";
     public array $path_info;
+    private array $pic_lists;
+    private array $file_map;
+    private string|int $max_drawing;
+    //private array $xml_pic_map;
 
     public function __construct(string $origin_file, string $file_path = '')
     {
@@ -23,9 +29,6 @@
         if ($name === 'origin_file') {
             $this->origin_file = $value;
         }
-        spl_autoload();
-
-        // TODO: Implement __set() method.
     }
 
     public function run(): array
@@ -35,11 +38,16 @@
         try {
             $this->getPathInfo();
             $this->copyFile();
-            $this->extractZip($this->file_path . $this->zip_name, ['xl/media', 'xl/drawings/drawing1.xml']);
-            $xml_string = $this->getXmlContent();
-            $xml_array = $this->covertToArray($xml_string);
-            $response['data'] = $this->parseRow($xml_array);
+            $this->extractZip($this->file_path . $this->zip_name, ['xl/media', 'xl/drawings/drawing', 'xl/drawings/_rels']);
+            $xml_res_array = $this->getXmlContent();
+            foreach ($xml_res_array as $xml_key => $xml_map) {
+
+                $xml_array = $this->parseXmlContent($xml_map);
+                $xml_pic[$xml_key] = $this->parseXmlPicContent($xml_map);
+                $response['data'][$xml_key] = $this->parseRow($xml_key , $xml_array , $xml_pic);
+            }
             $this->removeZip();
+            return $response;
         } catch (Exception $exception) {
             $response['code'] = $exception->getCode();
             $response['message'] = $exception->getMessage();
@@ -108,11 +116,17 @@
         if ($res !== true) {
             throw new Exception("zip文件不存在", "602");
         }
-
+        $file_map = [];
         for ($i = 0; $i < $zip->numFiles; $i++) {
             $zip_entry_name = $zip->getNameIndex($i);
             $complete_path = $this->extract_path . $zip_entry_name;
             $save = false;
+
+            if (str_starts_with($zip_entry_name, "xl/drawings/drawing")) {
+                preg_match("/drawing(\d+)\.xml/", $zip_entry_name, $mat);
+                $this->max_drawing = ++$mat[1] ?? 2;
+            }
+
             foreach ($need_files as $need_file) {
                 if (str_starts_with($zip_entry_name, $need_file)) {
                     $save = true;
@@ -131,8 +145,12 @@
                 if ($res === false) {
                     throw new Exception("zip文件解压失败", "602");
                 }
+                if (str_starts_with($zip_entry_name, $this->media_path)) {
+                    $file_map[$path_info['filename']] = $this->setPathInfo($path_info, $complete_path);
+                }
             }
         }
+        $this->file_map = $file_map;
         /*$res = $zip->extractTo($this->extract_path);
         if (!$res) {
             throw new Exception("zip文件解压失败", "602");
@@ -143,19 +161,81 @@
     /**
      * @throws Exception
      */
-    protected function getXmlContent(): string
+    protected function parseXmlContent($xml_map): array
     {
-        $xml_path = $this->extract_path . $this->xml_path;
-        if (!file_exists($xml_path)) {
-            throw new  Exception("xml文件不存在,请检查上传文件", "701");
+        try {
+            $xml_array = $this->covertToArray($xml_map['xml_string']);
+        } catch (Exception $exception) {
+            throw new  Exception($exception->getMessage(), $exception->getCode());
+        }
+        return $xml_array;
+    }
+
+    /**
+     * @throws Exception
+     */
+    protected function parseXmlPicContent($xml_map): array
+    {
+        try {
+            $xml_rel_array = $this->covertToArray($xml_map['xml_rel_string']);
+        } catch (Exception $exception) {
+            throw new  Exception($exception->getMessage(), $exception->getCode());
         }
 
-        $xml_string = file_get_contents($xml_path);
-        if (!$xml_string) {
-            throw new  Exception("xml获取失败", "702");
+        if (empty($xml_rel_array['Relationship'])) {
+            throw new  Exception("xml图片关系解析失败", "1002");
+        }
+        $xml_pic_map = [];
+
+        if (isset($xml_rel_array['Relationship']['@attributes'])) {
+            $xml_pic_dom[]= $xml_rel_array['Relationship'];
+        } else {
+            $xml_pic_dom = $xml_rel_array['Relationship'];
         }
 
-        return $xml_string;
+        foreach ($xml_pic_dom as $item) {
+            preg_match("/(image\d+)/", $item['@attributes']['Target'] ?? "" , $mat);
+
+            if (!empty($mat['1'])) {
+                $xml_pic_map[$item['@attributes']['Id']] = $mat['1'];
+            }
+        }
+
+        //$this->xml_pic_map[$xml_key] = $xml_pic_map;
+        return $xml_pic_map;
+    }
+
+    /**
+     * @throws Exception
+     */
+    protected function getXmlContent(): array
+    {
+        $max = $this->max_drawing ?? 2;
+        $xml_content_map = [];
+        for ($i = 1; $i < $max; $i++) {
+            $xml_path = $this->extract_path . str_replace("{{number}}", $i, $this->xml_path);
+            if (!file_exists($xml_path)) {
+                throw new  Exception("xml文件不存在,请检查上传文件", "701");
+            }
+
+            $xml_string = file_get_contents($xml_path);
+            if (!$xml_string) {
+                throw new  Exception("xml获取失败", "702");
+            }
+
+            $xml_rel_path = $this->extract_path . str_replace("{{number}}", $i, $this->xml_rel_path);
+            if (!file_exists($xml_rel_path)) {
+                throw new  Exception("xml.rel文件不存在,请检查上传文件", "701");
+            }
+
+            $xml_rel_string = file_get_contents($xml_rel_path);
+            if (!$xml_rel_string) {
+                throw new  Exception("xml.rel获取失败", "702");
+            }
+            $xml_content_map[$i]['xml_string'] = $xml_string;
+            $xml_content_map[$i]['xml_rel_string'] = $xml_rel_string;
+        }
+        return $xml_content_map;
     }
 
     /**
@@ -229,23 +309,53 @@
     /**
      * @throws Exception
      */
-    public function parseRow($xml_array): array
+    public function parseRow($xml_key , $xml_array , $xml_pic_map): array
     {
         $pics = [];
-        if (!isset($xml_array['xdr:twoCellAnchor'])) {
+        if (!empty($xml_array['xdr:twoCellAnchor'])) {
+            $temp_dom_arr = $xml_array['xdr:twoCellAnchor'];
+        } else {
+            $temp_dom_arr = $xml_array['xdr:oneCellAnchor'] ?? [];
+        }
+
+        if (empty($temp_dom_arr)) {
+            throw new  Exception("xml解析失败", "903");
+        }
+
+        if (isset($temp_dom_arr['xdr:from'])) {
+            $dom_arr[] = $temp_dom_arr;
+        } else {
+            $dom_arr = $temp_dom_arr;
+        }
+
+        if (empty($dom_arr)) {
             throw new  Exception("xml解析失败", "901");
         }
-        foreach ($xml_array['xdr:twoCellAnchor'] as $dom) {
+
+        $pic_lists = [];
+        foreach ($dom_arr as $dom) {
+
             $row = $dom['xdr:from']['xdr:row'] ?? 0;//行
             $col = $dom['xdr:from']['xdr:col'] ?? 0;//列
-            if (!$row) {
+            if (!$row && !$col) {
                 throw new  Exception("xml解析失败", "902");
             }
             $pic = $dom['xdr:pic']['xdr:blipFill']['a:blip']['@attributes']['embed'] ?? "";
             if ($pic) {
-                $pics[$col][$row][] = str_replace("rId", "image", $pic);
+
+                $temp_name = str_replace("rId", "image", $pic);
+                $pics[$col][$row][] = $temp_name;
+                $pic_lists[] = [
+                    'sheet' => $xml_key,
+                    'name' => $temp_name,
+                    'row' => $row,
+                    'col' => $col,
+                    'path_info' => $this->file_map[$xml_pic_map[$xml_key][$pic]??""] ?? [],
+
+                ];
             }
         }
+        $this->pic_lists[$xml_key] = $pic_lists;
         return $pics;
     }
 
@@ -256,13 +366,34 @@
         }
     }
 
+    public function getPicList(): array
+    {
+        return $this->pic_lists ?? [];
+    }
+
+    protected function setPathInfo($path_info, $complete_path): array
+    {
+        $file_map = $path_info;
+        $file_map['complete_path'] = $complete_path;
+        $file_map['media_path'] = $this->media_path;
+        if (file_exists($complete_path)) {
+            $file_map['md5'] = md5($complete_path);
+            //$file_map['base64_encode'] = base64_encode(file_get_contents($complete_path));
+        } else {
+            $file_map['md5'] = '';
+            $file_map['base64_encode'] = '';
+        }
+        return $file_map;
+    }
+
 }
 
 $origin_name1 = 'D:/SubjectForTest/file/package_HYmodel_test_has_picture.xlsx';
 $origin_name2 = 'D:/SubjectForTest/file/package_HYmodel_test_1_picture.xlsx';
-$pic = new extractExcelPic('' , "D:/SubjectForTest/file/123/");
-$pic->origin_file = $origin_name1;
-$res = $pic->run();
+$pic = new extractExcelPic('', "D:/SubjectForTest/file/123/");
+/*$pic->origin_file = $origin_name1;
+$res = $pic->run();*/
 $pic->origin_file = $origin_name2;
-$res = $pic->run();
+$pic->run();
+$res = $pic->getPicList();
 var_dump($res);
