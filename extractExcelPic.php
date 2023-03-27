@@ -347,7 +347,7 @@
                 $pics[$col][$row][] = $temp_name;
                 $pic_lists[] = [
                     'sheet' => $xml_key,
-                    'name' => $temp_name,
+                    'name' => $this->file_map[$xml_pic_map[$xml_key][$pic]??""]['filename'] ?? $temp_name,
                     'row' => $row,
                     'col' => $col,
                     'path_info' => $this->file_map[$xml_pic_map[$xml_key][$pic]??""] ?? [],
@@ -388,9 +388,9 @@
 
 }
 
-$origin_name1 = 'D:/SubjectForTest/file/package_HYmodel_test_has_picture.xlsx';
-$origin_name2 = 'D:/SubjectForTest/file/package_HYmodel_test_1_picture.xlsx';
-$pic = new extractExcelPic('', "D:/SubjectForTest/file/123/");
+//$origin_name1 = 'D:/SubjectForTest/file/package_167件-KJG4762303071956M.xlsx';
+$origin_name2 = 'D:/SubjectForTest/file/test.xlsx';
+$pic = new extractExcelPic('', "D:/SubjectForTest/file/");
 /*$pic->origin_file = $origin_name1;
 $res = $pic->run();*/
 $pic->origin_file = $origin_name2;
